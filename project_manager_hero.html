@@ -75,7 +75,7 @@ window.onload = function() {
   let gameStarted = false;
   let highScore = 0;
   let gameOverHandled = false;
-  let jumpSound, coinSound, hitSound, failSound, ouchSound;
+  let jumpSound, coinSound, hitSound, failSound, ouchSound, yesSound;
 
   function preload() {
     // Add a loading text
@@ -106,6 +106,7 @@ window.onload = function() {
     this.load.audio('hit',  'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/slam.mp3');
     this.load.audio('fail', 'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/fail.flac');
     this.load.audio('ouch', 'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/ouch.wav');
+    this.load.audio('yes',  'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/yes.wav');
   }
 
   function create() {
@@ -156,6 +157,7 @@ window.onload = function() {
     hitSound  = this.sound.add('hit');
     failSound = this.sound.add('fail');
     ouchSound = this.sound.add('ouch');
+    yesSound  = this.sound.add('yes');
 
     // Overlaps
     this.physics.add.overlap(player, obstacles, hitBlock, null, this);
@@ -263,7 +265,7 @@ window.onload = function() {
     cr.destroy();
     score++;
     moneyTotal -= 200;
-    coinSound.play();
+    yesSound.play();
   }
   function collectCash(p, cash) {
     cash.destroy();
