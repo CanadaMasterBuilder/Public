@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <title>Project Manager Hero: Crane Collector</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/building_crane.png">
   <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
   <style> body { margin: 0; } </style>
 </head>
 <body>
-<div id="leaderboard" style="position:absolute; left:820px; top:10px; width:220px; background:#222; color:#fff; padding:16px; border-radius:8px; font-family:Arial,sans-serif;">
+<!-- Move leaderboard to the right of the new game area -->
+<div id="leaderboard" style="position:absolute; left:1060px; top:10px; width:240px; background:#222; color:#fff; padding:16px; border-radius:8px; font-family:Arial,sans-serif;">
   <h3 style="color:#00ff00; margin-top:0;">Leaderboard</h3>
   <ol id="leaderboard-list"></ol>
 </div>
@@ -29,11 +31,26 @@ function fetchLeaderboard() {
     .then(data => renderLeaderboard(data));
 }
 
-// Render leaderboard in the HTML
+// Render leaderboard in the HTML: show only highest score per player
 function renderLeaderboard(data) {
   const list = document.getElementById('leaderboard-list');
   list.innerHTML = '';
-  data.slice(0, 10).forEach(entry => {
+
+  // Build a map of name -> highest score
+  const bestScores = {};
+  data.forEach(entry => {
+    if (!bestScores[entry.name] || Number(entry.score) > Number(bestScores[entry.name])) {
+      bestScores[entry.name] = Number(entry.score);
+    }
+  });
+
+  // Convert to array and sort by score descending
+  const sorted = Object.entries(bestScores)
+    .map(([name, score]) => ({ name, score }))
+    .sort((a, b) => b.score - a.score);
+
+  // Show top 10
+  sorted.slice(0, 10).forEach(entry => {
     const li = document.createElement('li');
     li.textContent = `${entry.name}: ${entry.score}`;
     list.appendChild(li);
@@ -48,18 +65,8 @@ window.onload = function() {
     if (!playerName) playerName = ""; // force re-prompt if blank
   }
 
-  const config = {
-    type: Phaser.AUTO,
-    width: 800,
-    height: 400,
-    physics: {
-      default: 'arcade',
-      arcade: { gravity: { y: 1000 }, debug: false }
-    },
-    scene: { preload, create, update }
-  };
-  const game = new Phaser.Game(config);
-
+  // Game state variables
+  let instructions;
   let player, cursors;
   let obstacles, cranes, cashGroup, changeOrderGroup;
   let score = 0, lives = 3, moneyTotal = 0;
@@ -68,8 +75,22 @@ window.onload = function() {
   let gameStarted = false;
   let highScore = 0;
   let gameOverHandled = false;
+  let jumpSound, coinSound, hitSound, failSound, ouchSound;
 
   function preload() {
+    // Add a loading text
+    const loadingText = this.add.text(520, 260, 'Loading...', { font: '32px Arial', fill: '#ffff00' }).setOrigin(0.5);
+
+    // Optionally, show progress
+    this.load.on('progress', (value) => {
+      loadingText.setText('Loading... ' + Math.round(value * 100) + '%');
+    });
+
+    this.load.on('complete', () => {
+      loadingText.destroy();
+    });
+
+    // Asset loading
     this.load.image('construction',
       'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/construction_worker.png');
     this.load.image('block',
@@ -80,24 +101,29 @@ window.onload = function() {
       'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/money.png');
     this.load.image('change_order',
       'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/change_order.png');
+    this.load.audio('jump', 'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/jump.flac');
+    this.load.audio('coin', 'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/coins.wav');
+    this.load.audio('hit',  'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/slam.mp3');
+    this.load.audio('fail', 'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/fail.flac');
+    this.load.audio('ouch', 'https://raw.githubusercontent.com/CanadaMasterBuilder/Public/main/assets/ouch.wav');
   }
 
   function create() {
     // Background and ground visuals
-    this.add.rectangle(400, 200, 800, 400, 0x202020);
-    this.add.rectangle(400, 375, 800, 50, 0x00cc00);
+    this.add.rectangle(520, 260, 1040, 520, 0x202020); // Centered background
+    this.add.rectangle(520, 490, 1040, 60, 0x00cc00); // Ground
 
     // Invisible ground for physics
     const ground = this.physics.add.staticGroup();
-    ground.create(400, 375, null)
-      .setDisplaySize(800, 50)
+    ground.create(520, 490, null)
+      .setDisplaySize(1040, 60)
       .setOrigin(0.5)
       .refreshBody()
       .setAlpha(0);
 
     // Player sprite
-    player = this.physics.add.sprite(100, 300, 'construction')
-      .setDisplaySize(40, 40)
+    player = this.physics.add.sprite(130, 400, 'construction')
+      .setDisplaySize(52, 52)
       .setCollideWorldBounds(true);
     this.physics.add.collider(player, ground);
 
@@ -110,19 +136,26 @@ window.onload = function() {
     // Input
     cursors = this.input.keyboard.createCursorKeys();
 
-    // UI texts
-    scoreText = this.add.text(10, 10, 'Score: 0', { font: '20px Arial', fill: '#00ff00' });
-    livesText = this.add.text(10, 35, 'Lives: 3', { font: '20px Arial', fill: '#00ff00' });
-    moneyText = this.add.text(600, 10, 'Money: $0', { font: '20px Arial', fill: '#00ff00' });
-    highScoreText = this.add.text(790, 390, 'High Score: ' + highScore, { font: '10px Arial', fill: '#000000' }).setOrigin(1);
+    // UI texts (adjusted for new width/height)
+    scoreText = this.add.text(10, 10, 'Score: 0', { font: '24px Arial', fill: '#00ff00' });
+    livesText = this.add.text(10, 40, 'Lives: 3', { font: '24px Arial', fill: '#00ff00' });
+    moneyText = this.add.text(800, 10, 'Money: $0', { font: '24px Arial', fill: '#00ff00' });
+    highScoreText = this.add.text(1030, 510, 'High Score: ' + highScore, { font: '14px Arial', fill: '#000000' }).setOrigin(1);
 
     // Show player name at bottom left
-    playerNameText = this.add.text(10, 380, 'Player: ' + playerName, { font: '16px Arial', fill: '#00ff00' });
+    playerNameText = this.add.text(10, 500, 'Player: ' + playerName, { font: '20px Arial', fill: '#00ff00' });
 
-    // Instructions overlay
-    const instructions = this.add.text(400, 200,
-      'Press SPACE to jump.\nAvoid road blocks and change orders \n Collect cranes & cash!',
-      { font: '24px Arial', fill: '#ffff00', align: 'center' }).setOrigin(0.5);
+    // Instructions overlay (centered)
+    instructions = this.add.text(520, 260,
+      'Press SPACE to jump.\nAvoid road blocks and change orders\nCollect cranes & cash!',
+      { font: '32px Arial', fill: '#ffff00', align: 'center' }).setOrigin(0.5);
+
+    // Sound objects
+    jumpSound = this.sound.add('jump');
+    coinSound = this.sound.add('coin');
+    hitSound  = this.sound.add('hit');
+    failSound = this.sound.add('fail');
+    ouchSound = this.sound.add('ouch');
 
     // Overlaps
     this.physics.add.overlap(player, obstacles, hitBlock, null, this);
@@ -135,7 +168,7 @@ window.onload = function() {
     this.time.paused = true;
 
     // On first space, start game
-    this.input.keyboard.on('keydown-SPACE', () => {
+    this.input.keyboard.once('keydown-SPACE', () => {
       if (!gameStarted) {
         gameStarted = true;
         instructions.setVisible(false);
@@ -152,7 +185,8 @@ window.onload = function() {
   function update() {
     if (!gameStarted) return;
     if (cursors.space.isDown && player.body.onFloor()) {
-      player.setVelocityY(-600);
+      player.setVelocityY(-900); // Reduced jump height for higher gravity
+      jumpSound.play();
     }
     if (lives <= 0 && !gameOverHandled) {
       gameOverHandled = true; // Prevent multiple triggers
@@ -162,6 +196,8 @@ window.onload = function() {
       if (score > 5) {
         submitScore(playerName, score);
       }
+
+      failSound.play();
 
       setTimeout(() => {
         this.scene.restart();
@@ -177,7 +213,6 @@ window.onload = function() {
     livesText.setText('Lives: ' + lives);
     moneyText.setText('Money: $' + moneyTotal);
     highScoreText.setText('High Score: ' + highScore);
-    // playerNameText does not need to update, but you could if you want to allow name changes
   }
 
   // Spawn either a roadblock or a change order (10% chance for change order)
@@ -185,16 +220,17 @@ window.onload = function() {
     if (showInstructions) return;
     if (Math.random() < 0.1) {
       // Spawn change order (invoice)
-      const changeOrder = changeOrderGroup.create(810, 340, 'change_order') // y=340 so it sits on ground
-        .setDisplaySize(75, 75)
-        .setVelocityX(-200)
+      changeOrderGroup.create(1060, 445, 'change_order')
+        .setDisplaySize(98, 98)
+        .setVelocityX(-260)
         .setImmovable(true)
-        .body.setAllowGravity(false); // No gravity so it doesn't fall
+        .body.setAllowGravity(false);
     } else {
-      // Spawn roadblock
-      obstacles.create(810, 340, 'block')
-        .setDisplaySize(40, 40)
-        .setVelocityX(-200)
+      // Spawn roadblock with random vertical offset (adds variation, but speed is constant)
+      const y = Phaser.Math.Between(430, 445); // vary y slightly (ground is at 445)
+      obstacles.create(1060, y, 'block')
+        .setDisplaySize(52, 52)
+        .setVelocityX(-260)
         .setImmovable(true)
         .body.setAllowGravity(false);
     }
@@ -202,32 +238,64 @@ window.onload = function() {
 
   function spawnCrane() {
     if (showInstructions) return;
-    const y = Phaser.Math.Between(150, 280);
-    cranes.create(810, y, 'crane')
-      .setDisplaySize(40, 40)
-      .setVelocityX(-200)
+    const y = Phaser.Math.Between(200, 390);
+    cranes.create(1060, y, 'crane')
+      .setDisplaySize(52, 52)
+      .setVelocityX(-260)
       .body.setAllowGravity(false);
   }
 
   function spawnCash() {
     if (showInstructions) return;
-    const y = Phaser.Math.Between(120, 300);
-    cashGroup.create(810, y, 'cash')
-      .setDisplaySize(36, 36)
-      .setVelocityX(-200)
+    const y = Phaser.Math.Between(160, 420);
+    cashGroup.create(1060, y, 'cash')
+      .setDisplaySize(47, 47)
+      .setVelocityX(-260)
       .body.setAllowGravity(false);
   }
 
-  function hitBlock(p, block) { block.destroy(); lives--; }
-  function collectCrane(p, cr) { cr.destroy(); score++; moneyTotal -= 200; }
+  function hitBlock(p, block) {
+    block.destroy();
+    lives--;
+    hitSound.play();
+  }
+  function collectCrane(p, cr) {
+    cr.destroy();
+    score++;
+    moneyTotal -= 200;
+    coinSound.play();
+  }
   function collectCash(p, cash) {
-    cash.destroy(); moneyTotal += 100;
+    cash.destroy();
+    moneyTotal += 100;
+    coinSound.play();
     while (moneyTotal >= 5000) { lives++; moneyTotal -= 5000; }
   }
   function hitChangeOrder(p, changeOrder) {
     changeOrder.destroy();
     moneyTotal -= 1000;
+    ouchSound.play();
   }
+
+  // 2. THEN define your scene object
+  const mainScene = {
+    preload,
+    create,
+    update
+  };
+
+  // 3. Phaser config and game creation
+  const config = {
+    type: Phaser.AUTO,
+    width: 1040,
+    height: 520,
+    physics: {
+      default: 'arcade',
+      arcade: { gravity: { y: 1600 }, debug: false }
+    },
+    scene: mainScene
+  };
+  const game = new Phaser.Game(config);
 
   // Fetch leaderboard on page load
   fetchLeaderboard();
