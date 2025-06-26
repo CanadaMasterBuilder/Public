@@ -76,6 +76,7 @@ window.onload = function() {
   let highScore = 0;
   let gameOverHandled = false;
   let jumpSound, coinSound, hitSound, failSound, ouchSound, yesSound;
+   let cashCollectedCount = 0;
 
   function preload() {
     // Add a loading text
@@ -266,17 +267,74 @@ window.onload = function() {
     score++;
     moneyTotal -= 200;
     yesSound.play();
+
+    // 8% chance to show "Crane lift - Progress!" feedback in yellow
+    if (Math.random() < 0.45) {
+      const craneText = p.scene.add.text(p.x, p.y - 60, "Crane lift - Progress!", {
+        font: "24px Arial",
+        fill: "#ffff00",
+        stroke: "#000",
+        strokeThickness: 4
+      }).setOrigin(0.5);
+
+      p.scene.tweens.add({
+        targets: craneText,
+        y: craneText.y - 40,
+        alpha: 0,
+        duration: 1000,
+        onComplete: () => craneText.destroy()
+      });
+    }
   }
   function collectCash(p, cash) {
     cash.destroy();
     moneyTotal += 100;
     coinSound.play();
+    cashCollectedCount++;
+
+    // Show "+$100" floating text on first and every 8-12th cash
+    if (
+      cashCollectedCount === 1 ||
+      (cashCollectedCount > 1 && (cashCollectedCount - 1) % Phaser.Math.Between(8, 12) === 0)
+    ) {
+      const plusText = p.scene.add.text(p.x, p.y - 40, "+$100", {
+        font: "28px Arial",
+        fill: "#00ff00",
+        stroke: "#000",
+        strokeThickness: 4
+      }).setOrigin(0.5);
+
+      p.scene.tweens.add({
+        targets: plusText,
+        y: plusText.y - 40,
+        alpha: 0,
+        duration: 750,
+        onComplete: () => plusText.destroy()
+      });
+    }
+
     while (moneyTotal >= 5000) { lives++; moneyTotal -= 5000; }
   }
   function hitChangeOrder(p, changeOrder) {
     changeOrder.destroy();
     moneyTotal -= 1000;
     ouchSound.play();
+
+    // Centered floating red feedback text for 2 seconds with fade away
+    const feedback = p.scene.add.text(520, 200, "Change order delays build", {
+      font: "32px Arial",
+      fill: "#ff2222",
+      stroke: "#000",
+      strokeThickness: 6
+    }).setOrigin(0.5);
+
+    p.scene.tweens.add({
+      targets: feedback,
+      alpha: 0,
+      duration: 2000,
+      ease: 'Linear',
+      onComplete: () => feedback.destroy()
+    });
   }
 
   // 2. THEN define your scene object
