@@ -37,7 +37,7 @@
     }, 30000);
   </script>
   <!-- OpenCV.js for advanced preprocessing -->
-  <script async src="https://cdn.jsdelivr.net/npm/opencv.js@4.5.5/opencv.js" onload="cv['onRuntimeInitialized']=onOpenCvReady;"></script>
+  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="cv['onRuntimeInitialized']=onOpenCvReady;"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
@@ -101,47 +101,18 @@
     });
 
     function fullPreprocess(src) {
-      // Deskew
+      // Convert to grayscale
       const gray = new cv.Mat();
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-      const bin = new cv.Mat();
-      cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-      const lines = new cv.Mat();
-      cv.HoughLinesP(bin, lines, 1, Math.PI/180, 100, src.cols/2, 20);
-      let angles = [];
-      for (let i = 0; i < lines.rows; i++) {
-        const l = lines.intPtr(i);
-        const angle = Math.atan2(l[3]-l[1], l[2]-l[0]) * 180/Math.PI;
-        if (Math.abs(angle) < 45) angles.push(angle);
-      }
-      const avgAngle = angles.reduce((a,b) => a+b, 0) / (angles.length||1);
-      const M = cv.getRotationMatrix2D(new cv.Point(src.cols/2, src.rows/2), avgAngle, 1);
-      const rotated = new cv.Mat();
-      cv.warpAffine(src, rotated, M, new cv.Size(src.cols, src.rows), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255,255,255,255));
-      gray.delete(); bin.delete(); lines.delete(); M.delete(); src.delete();
-
-      // Upscale for clarity
-      cv.pyrUp(rotated, rotated, new cv.Size(rotated.cols*2, rotated.rows*2));
 
       // Adaptive threshold
-      cv.cvtColor(rotated, rotated, cv.COLOR_RGBA2GRAY, 0);
-      cv.adaptiveThreshold(rotated, rotated, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 15, 10);
+      const thresh = new cv.Mat();
+      cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 15, 10);
 
-      // Morphological opening
-      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3,3));
-      cv.morphologyEx(rotated, rotated, cv.MORPH_OPEN, kernel);
-      kernel.delete();
+      gray.delete();
+      src.delete();
 
-      // Remove grid lines
-      const gridLines = new cv.Mat();
-      cv.HoughLinesP(rotated, gridLines, 1, Math.PI/180, 100, rotated.cols/2, 20);
-      for (let i = 0; i < gridLines.rows; i++) {
-        const l = gridLines.intPtr(i);
-        cv.line(rotated, new cv.Point(l[0],l[1]), new cv.Point(l[2],l[3]), new cv.Scalar(0,0,0,255), 2);
-      }
-      gridLines.delete();
-
-      return rotated;
+      return thresh;
     }
 
     ocrBtn.addEventListener('click', async () => {
@@ -161,41 +132,42 @@
       proc.delete();
 
       // OCR per field
+      progressEl.value = 0;
       const { createWorker, PSM } = Tesseract;
       const worker = await createWorker();
       await worker.setParameters({
-        tessedit_char_whitelist: '0123456789:',
         preserve_interword_spaces: '1',
-        tessedit_pageseg_mode: PSM.SINGLE_CHAR
+        tessedit_pageseg_mode: PSM.AUTO // or PSM.SPARSE_TEXT
       });
 
-      let results = {};
-      const cw = canvas.width, ch = canvas.height;
-      let i = 0, total = Object.keys(templateFields).length;
-      for (const [key, f] of Object.entries(templateFields)) {
-        const x = Math.round(f.x*cw), y = Math.round(f.y*ch), w = Math.round(f.w*cw), h = Math.round(f.h*ch);
-        const cellCanvas = document.createElement('canvas');
-        cellCanvas.width = w; cellCanvas.height = h;
-        cellCanvas.getContext('2d').drawImage(canvas, x, y, w, h, 0, 0, w, h);
-        const { data: { text } } = await worker.recognize(cellCanvas, 'eng', {
-          logger: m => {
-            if (m.status === 'recognizing text') {
-              progressEl.value = (i + m.progress) / total;
-            }
-          }
-        });
-        results[key] = text.trim();
-        i++;
-        progressEl.value = i / total;
-      }
+      const { data: { text } } = await worker.recognize(canvas, 'eng', {
+        // No logger function needed for Tesseract v5+
+      });
       await worker.terminate();
 
-      // Assemble CSV
-      const headers = Object.keys(results);
-      const row = headers.map(h => '"'+results[h].replace(/"/g,'""')+'"');
-      const csv = headers.join(',') + '\n' + row.join(',');
+      progressEl.value = 1;
+
+      // Split OCR text into lines
+      const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+      // Prepare CSV header
+      const csvRows = [];
+      csvRows.push('Code,Description,Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday');
+
+      // For each line, try to extract columns
+      for (const line of lines) {
+        // Try to match: code (numbers), description (words), then 7 numbers (hours)
+        // This regex assumes columns are separated by spaces or tabs
+        const match = line.match(/^(\d{3,6})\s+([A-Za-z0-9\s\/\-\(\)\.]+?)\s+(\d+(?:\.\d)?|\s)\s+(\d+(?:\.\d)?|\s)\s+(\d+(?:\.\d)?|\s)\s+(\d+(?:\.\d)?|\s)\s+(\d+(?:\.\d)?|\s)\s+(\d+(?:\.\d)?|\s)\s+(\d+(?:\.\d)?|\s)$/);
+        if (match) {
+          // Format as CSV row
+          const row = match.slice(1).map(v => `"${v.trim()}"`).join(',');
+          csvRows.push(row);
+        }
+      }
 
       // Show and enable download
+      const csv = csvRows.join('\n');
       progressEl.style.display = 'none';
       ocrBtn.textContent = 'Recognize Timesheet';
       ocrBtn.disabled = false;
@@ -206,9 +178,11 @@
       downloadCsv.onclick = () => {
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'timesheet.csv'; a.click(); URL.revokeObjectURL(url);
+        const a = document.createElement('a'); a.href = url; a.download = 'timesheet_hours.csv'; a.click(); URL.revokeObjectURL(url);
       };
     });
+
+    Tesseract.setLogging(true);
   </script>
 </body>
 </html>
