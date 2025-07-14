@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Field Time Timesheet OCR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
+    .container { max-width: 700px; margin: 30px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 24px; }
+    h2 { text-align: center; color: #0078d4; }
+    .preview, #canvas { width: 100%; margin: 16px 0; border-radius: 6px; }
+    button, input[type="file"] { width: 100%; margin: 8px 0; padding: 12px; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; }
+    button { background: #0078d4; color: #fff; border: none; cursor: pointer; }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+    .result { background: #e6ffe6; color: #222; padding: 10px; border-radius: 6px; margin-top: 10px; font-family: monospace; white-space: pre-wrap; }
+    .error  { background: #ffe6e6; color: #a00; padding: 10px; border-radius: 6px; margin-top: 10px; }
+    #opencvLoading { width: 100%; margin: 16px 0; text-align: center; color: #0078d4; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+  </style>
+  <script>
+    // OpenCV.js loading progress
+    window.cvReady = false;
+    function onOpenCvReady() {
+      window.cvReady = true;
+      document.getElementById('opencvLoading').style.display = 'none';
+      console.log('OpenCV.js is ready');
+      var canvasEl = document.getElementById('canvas');
+      var ocrBtnEl = document.getElementById('ocrBtn');
+      if (canvasEl && ocrBtnEl && canvasEl.width > 0 && canvasEl.height > 0) {
+        ocrBtnEl.disabled = false;
+      }
+    }
+    setTimeout(function() {
+      if (!window.cvReady) {
+        document.getElementById('opencvLoading').textContent = "Failed to load OpenCV.js. Please check your internet connection or try again later.";
+      }
+    }, 30000);
+  </script>
+  <!-- OpenCV.js for advanced preprocessing -->
+  <script async src="https://cdn.jsdelivr.net/npm/opencv.js@4.5.5/opencv.js" onload="cv['onRuntimeInitialized']=onOpenCvReady;"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h2>Upload Timesheet Photo</h2>
+    <!-- Only show spinner/message, no fake progress -->
+    <div id="opencvLoading">
+      <span>Loading OpenCV.js...</span>
+      <span id="spinner" style="display:inline-block;width:24px;height:24px;border:3px solid #0078d4;border-radius:50%;border-top:3px solid transparent;animation:spin 1s linear infinite;vertical-align:middle;"></span>
+    </div>
+    <input type="file" accept="image/*" capture="environment" id="photoInput">
+    <canvas id="canvas" style="display:none;"></canvas>
+    <progress id="progress" max="1" value="0" style="width:100%; display:none;"></progress>
+    <button id="ocrBtn" disabled>Recognize Timesheet</button>
+    <pre id="ocrResult" class="result" style="display:none;"></pre>
+    <div id="errorMsg" class="error" style="display:none;"></div>
+    <button id="downloadCsv" style="display:none;">Download CSV</button>
+  </div>
+  <script>
+    const photoInput = document.getElementById('photoInput');
+    const canvas     = document.getElementById('canvas');
+    const progressEl = document.getElementById('progress');
+    const ocrBtn     = document.getElementById('ocrBtn');
+    const ocrResult  = document.getElementById('ocrResult');
+    const errorMsg   = document.getElementById('errorMsg');
+    const downloadCsv= document.getElementById('downloadCsv');
+
+    // Define template fields (percentages relative to full sheet)
+    const templateFields = {
+      employeeName: { x:0.10, y:0.10, w:0.40, h:0.05 },
+      weekStart:    { x:0.60, y:0.10, w:0.30, h:0.05 },
+      Mon:          { x:0.10, y:0.30, w:0.12, h:0.05 },
+      Tue:          { x:0.22, y:0.30, w:0.12, h:0.05 },
+      Wed:          { x:0.34, y:0.30, w:0.12, h:0.05 },
+      Thu:          { x:0.46, y:0.30, w:0.12, h:0.05 },
+      Fri:          { x:0.58, y:0.30, w:0.12, h:0.05 },
+      totalWeek:    { x:0.70, y:0.80, w:0.25, h:0.05 }
+    };
+
+    photoInput.addEventListener('change', () => {
+      errorMsg.style.display = 'none';
+      ocrResult.style.display = 'none';
+      downloadCsv.style.display = 'none';
+      if (photoInput.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          const img = new Image();
+          img.onload = () => {
+            canvas.style.display = 'block';
+            canvas.width  = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img,0,0);
+            // Only enable OCR if OpenCV is ready
+            ocrBtn.disabled = !window.cvReady;
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(photoInput.files[0]);
+      }
+    });
+
+    function fullPreprocess(src) {
+      // Deskew
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+      const bin = new cv.Mat();
+      cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+      const lines = new cv.Mat();
+      cv.HoughLinesP(bin, lines, 1, Math.PI/180, 100, src.cols/2, 20);
+      let angles = [];
+      for (let i = 0; i < lines.rows; i++) {
+        const l = lines.intPtr(i);
+        const angle = Math.atan2(l[3]-l[1], l[2]-l[0]) * 180/Math.PI;
+        if (Math.abs(angle) < 45) angles.push(angle);
+      }
+      const avgAngle = angles.reduce((a,b) => a+b, 0) / (angles.length||1);
+      const M = cv.getRotationMatrix2D(new cv.Point(src.cols/2, src.rows/2), avgAngle, 1);
+      const rotated = new cv.Mat();
+      cv.warpAffine(src, rotated, M, new cv.Size(src.cols, src.rows), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255,255,255,255));
+      gray.delete(); bin.delete(); lines.delete(); M.delete(); src.delete();
+
+      // Upscale for clarity
+      cv.pyrUp(rotated, rotated, new cv.Size(rotated.cols*2, rotated.rows*2));
+
+      // Adaptive threshold
+      cv.cvtColor(rotated, rotated, cv.COLOR_RGBA2GRAY, 0);
+      cv.adaptiveThreshold(rotated, rotated, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 15, 10);
+
+      // Morphological opening
+      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3,3));
+      cv.morphologyEx(rotated, rotated, cv.MORPH_OPEN, kernel);
+      kernel.delete();
+
+      // Remove grid lines
+      const gridLines = new cv.Mat();
+      cv.HoughLinesP(rotated, gridLines, 1, Math.PI/180, 100, rotated.cols/2, 20);
+      for (let i = 0; i < gridLines.rows; i++) {
+        const l = gridLines.intPtr(i);
+        cv.line(rotated, new cv.Point(l[0],l[1]), new cv.Point(l[2],l[3]), new cv.Scalar(0,0,0,255), 2);
+      }
+      gridLines.delete();
+
+      return rotated;
+    }
+
+    ocrBtn.addEventListener('click', async () => {
+      if (!window.cvReady) return alert('Processing library still loading');
+      errorMsg.style.display = 'none';
+      ocrResult.style.display = 'none';
+      downloadCsv.style.display = 'none';
+      ocrBtn.disabled = true;
+      ocrBtn.textContent = 'Recognizing...';
+      progressEl.value = 0;
+      progressEl.style.display = 'block';
+
+      // Read canvas into OpenCV Mat and preprocess
+      let src = cv.imread(canvas);
+      let proc = fullPreprocess(src);
+      cv.imshow(canvas, proc);
+      proc.delete();
+
+      // OCR per field
+      const { createWorker, PSM } = Tesseract;
+      const worker = await createWorker();
+      await worker.setParameters({
+        tessedit_char_whitelist: '0123456789:',
+        preserve_interword_spaces: '1',
+        tessedit_pageseg_mode: PSM.SINGLE_CHAR
+      });
+
+      let results = {};
+      const cw = canvas.width, ch = canvas.height;
+      let i = 0, total = Object.keys(templateFields).length;
+      for (const [key, f] of Object.entries(templateFields)) {
+        const x = Math.round(f.x*cw), y = Math.round(f.y*ch), w = Math.round(f.w*cw), h = Math.round(f.h*ch);
+        const cellCanvas = document.createElement('canvas');
+        cellCanvas.width = w; cellCanvas.height = h;
+        cellCanvas.getContext('2d').drawImage(canvas, x, y, w, h, 0, 0, w, h);
+        const { data: { text } } = await worker.recognize(cellCanvas, 'eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              progressEl.value = (i + m.progress) / total;
+            }
+          }
+        });
+        results[key] = text.trim();
+        i++;
+        progressEl.value = i / total;
+      }
+      await worker.terminate();
+
+      // Assemble CSV
+      const headers = Object.keys(results);
+      const row = headers.map(h => '"'+results[h].replace(/"/g,'""')+'"');
+      const csv = headers.join(',') + '\n' + row.join(',');
+
+      // Show and enable download
+      progressEl.style.display = 'none';
+      ocrBtn.textContent = 'Recognize Timesheet';
+      ocrBtn.disabled = false;
+
+      ocrResult.textContent = csv;
+      ocrResult.style.display = 'block';
+      downloadCsv.style.display = 'block';
+      downloadCsv.onclick = () => {
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'timesheet.csv'; a.click(); URL.revokeObjectURL(url);
+      };
+    });
+  </script>
+</body>
+</html>
