@@ -147,6 +147,13 @@
 
       progressEl.value = 1;
 
+      // Show raw OCR output first
+      ocrResult.textContent = text;
+      ocrResult.style.display = 'block';
+
+      // Wait a moment so user can see raw output before filtering
+      await new Promise(res => setTimeout(res, 1000));
+
       // Split OCR text into lines
       const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
 
@@ -172,7 +179,8 @@
       ocrBtn.textContent = 'Recognize Timesheet';
       ocrBtn.disabled = false;
 
-      ocrResult.textContent = csv;
+      // Show filtered CSV below the raw output
+      ocrResult.textContent = text + '\n\n--- Filtered CSV ---\n' + csv;
       ocrResult.style.display = 'block';
       downloadCsv.style.display = 'block';
       downloadCsv.onclick = () => {
