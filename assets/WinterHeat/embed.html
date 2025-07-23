@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Winter Heat Converter</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f8f8f8;
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+    }
+    .converter {
+      background: #ffffff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 1.5rem;
+      max-width: 360px;
+      width: 100%;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+    h2 {
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+      color: #333;
+    }
+    label {
+      display: block;
+      margin-bottom: 1rem;
+    }
+    input {
+      width: 100%;
+      padding: 0.5rem;
+      font-size: 1rem;
+      margin-top: 0.25rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="converter">
+    <h2>Winter Heat Converter</h2>
+    <label>BTU:
+      <input type="number" id="btuInput" placeholder="Enter BTU">
+    </label>
+    <label>kWh:
+      <input type="number" id="kwhInput" placeholder="Enter kWh">
+    </label>
+  </div>
+
+  <script>
+    const btuInput = document.getElementById('btuInput');
+    const kwhInput = document.getElementById('kwhInput');
+
+    let skip = false;
+
+    btuInput.addEventListener('input', () => {
+      if (skip) return;
+      skip = true;
+      const btu = parseFloat(btuInput.value);
+      kwhInput.value = isNaN(btu) ? '' : (btu * 0.00029307107).toFixed(4);
+      skip = false;
+    });
+
+    kwhInput.addEventListener('input', () => {
+      if (skip) return;
+      skip = true;
+      const kwh = parseFloat(kwhInput.value);
+      btuInput.value = isNaN(kwh) ? '' : (kwh / 0.00029307107).toFixed(2);
+      skip = false;
+    });
+  </script>
+</body>
+</html>
