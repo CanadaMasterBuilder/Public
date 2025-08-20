@@ -5,254 +5,312 @@
   <title>Field Time Timesheet OCR</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
-    .container { max-width: 700px; margin: 30px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 24px; }
-    h2 { text-align: center; color: #0078d4; }
-    .preview, #canvas { width: 100%; margin: 16px 0; border-radius: 6px; }
-    button, input[type="file"] { width: 100%; margin: 8px 0; padding: 12px; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; }
-    button { background: #0078d4; color: #fff; border: none; cursor: pointer; }
-    button:disabled { background: #aaa; cursor: not-allowed; }
-    .result { background: #e6ffe6; color: #222; padding: 10px; border-radius: 6px; margin-top: 10px; font-family: monospace; white-space: pre-wrap; }
-    .error  { background: #ffe6e6; color: #a00; padding: 10px; border-radius: 6px; margin-top: 10px; }
-    #opencvLoading { width: 100%; margin: 16px 0; text-align: center; color: #0078d4; }
-    @keyframes spin { 100% { transform: rotate(360deg); } }
+    body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f4f4f4; }
+    .wrapper { display:flex; flex-wrap:wrap; justify-content:center; }
+    .container { width:340px; margin:20px; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1); padding:24px; }
+    h2 { text-align:center; color:#0078d4; }
+    canvas { width:100%; margin:16px 0; border-radius:6px; }
+    button, input[type="file"] { width:100%; margin:8px 0; padding:12px; border-radius:6px; border:1px solid #ccc; font-size:1rem; }
+    button { background:#0078d4; color:#fff; border:none; cursor:pointer; }
+    button:disabled { background:#aaa; cursor:not-allowed; }
+    .result { background:#e6ffe6; color:#222; padding:10px; border-radius:6px; margin-top:10px; font-family:monospace; white-space:pre-wrap; }
+    .error { background:#ffe6e6; color:#a00; padding:10px; border-radius:6px; margin-top:10px; }
+    #opencvLoading { width:100%; margin:16px 0; text-align:center; color:#0078d4; }
+    @keyframes spin {100% { transform:rotate(360deg); } }
   </style>
   <script>
     // OpenCV.js loading progress
     window.cvReady = false;
-    function onOpenCvReady() {
+    function onOpenCvReady(){
       window.cvReady = true;
       document.getElementById('opencvLoading').style.display = 'none';
       console.log('OpenCV.js is ready');
-      var canvasEl = document.getElementById('canvas');
-      var ocrBtnEl = document.getElementById('ocrBtn');
-      if (canvasEl && ocrBtnEl && canvasEl.width > 0 && canvasEl.height > 0) {
-        ocrBtnEl.disabled = false;
-      }
+      let canvasEl = document.getElementById('canvas');
+      let ocrBtnEl = document.getElementById('ocrBtn');
+      if (canvasEl && ocrBtnEl && canvasEl.width>0 && canvasEl.height>0) ocrBtnEl.disabled = false;
+      let circleCanvasEl = document.getElementById('circleCanvas');
+      let circleBtnEl = document.getElementById('circleBtn');
+      if (circleCanvasEl && circleBtnEl && circleCanvasEl.width>0 && circleCanvasEl.height>0) circleBtnEl.disabled = false;
     }
-    setTimeout(function() {
-      if (!window.cvReady) {
+    setTimeout(()=>{
+      if(!window.cvReady){
         document.getElementById('opencvLoading').textContent = "Failed to load OpenCV.js. Please check your internet connection or try again later.";
       }
-    }, 30000);
+    },30000);
   </script>
-  <!-- OpenCV.js for advanced preprocessing -->
+  <!-- OpenCV.js -->
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="cv['onRuntimeInitialized']=onOpenCvReady;"></script>
   <!-- AWS SDK for Textract -->
   <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1376.0.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <h2>Upload Timesheet Photo</h2>
-    <!-- Only show spinner/message, no fake progress -->
-    <div id="opencvLoading">
-      <span>Loading OpenCV.js...</span>
-      <span id="spinner" style="display:inline-block;width:24px;height:24px;border:3px solid #0078d4;border-radius:50%;border-top:3px solid transparent;animation:spin 1s linear infinite;vertical-align:middle;"></span>
+  <div class="wrapper">
+    <div class="container">
+      <h2>Upload Timesheet Photo</h2>
+      <div id="opencvLoading">
+        <span>Loading OpenCV.js...</span>
+        <span id="spinner" style="display:inline-block;width:24px;height:24px;border:3px solid #0078d4;border-radius:50%;border-top:3px solid transparent;animation:spin 1s linear infinite;vertical-align:middle;"></span>
+      </div>
+      <input type="file" accept="image/*" capture="environment" id="photoInput">
+      <canvas id="canvas" style="display:none;"></canvas>
+      <progress id="progress" max="1" value="0" style="width:100%;display:none;"></progress>
+      <button id="ocrBtn" disabled>Recognize Timesheet</button>
+      <pre id="ocrResult" class="result" style="display:none;"></pre>
+      <div id="errorMsg" class="error" style="display:none;"></div>
+      <button id="downloadCsv" style="display:none;">Download CSV</button>
     </div>
-    <input type="file" accept="image/*" capture="environment" id="photoInput">
-    <canvas id="canvas" style="display:none;"></canvas>
-    <progress id="progress" max="1" value="0" style="width:100%; display:none;"></progress>
-    <button id="ocrBtn" disabled>Recognize Timesheet</button>
-    <pre id="ocrResult" class="result" style="display:none;"></pre>
-    <div id="errorMsg" class="error" style="display:none;"></div>
-    <button id="downloadCsv" style="display:none;">Download CSV</button>
+    <div class="container">
+      <h2>Upload Circle Timesheet</h2>
+      <input type="file" accept="image/*" capture="environment" id="circleInput">
+      <canvas id="circleCanvas" style="display:none;"></canvas>
+      <button id="circleBtn" disabled>Recognize Circles</button>
+      <pre id="circleResult" class="result" style="display:none;"></pre>
+    </div>
   </div>
   <script>
-    const photoInput = document.getElementById('photoInput');
-    const canvas     = document.getElementById('canvas');
-    const progressEl = document.getElementById('progress');
-    const ocrBtn     = document.getElementById('ocrBtn');
-    const ocrResult  = document.getElementById('ocrResult');
-    const errorMsg   = document.getElementById('errorMsg');
-    const downloadCsv= document.getElementById('downloadCsv');
+    const photoInput  = document.getElementById('photoInput');
+    const canvas      = document.getElementById('canvas');
+    const progressEl  = document.getElementById('progress');
+    const ocrBtn      = document.getElementById('ocrBtn');
+    const ocrResult   = document.getElementById('ocrResult');
+    const errorMsg    = document.getElementById('errorMsg');
+    const downloadCsv = document.getElementById('downloadCsv');
 
-    // Define template fields (percentages relative to full sheet)
+    const circleInput  = document.getElementById('circleInput');
+    const circleCanvas = document.getElementById('circleCanvas');
+    const circleBtn    = document.getElementById('circleBtn');
+    const circleResult = document.getElementById('circleResult');
+
+    // Define template fields for normal sheet
     const templateFields = {
-      employeeName: { x:0.10, y:0.10, w:0.40, h:0.05 },
-      weekStart:    { x:0.60, y:0.10, w:0.30, h:0.05 },
-      Mon:          { x:0.10, y:0.30, w:0.12, h:0.05 },
-      Tue:          { x:0.22, y:0.30, w:0.12, h:0.05 },
-      Wed:          { x:0.34, y:0.30, w:0.12, h:0.05 },
-      Thu:          { x:0.46, y:0.30, w:0.12, h:0.05 },
-      Fri:          { x:0.58, y:0.30, w:0.12, h:0.05 },
-      totalWeek:    { x:0.70, y:0.80, w:0.25, h:0.05 }
+      employeeName:{x:0.10,y:0.10,w:0.40,h:0.05},
+      weekStart:{x:0.60,y:0.10,w:0.30,h:0.05},
+      Mon:{x:0.10,y:0.30,w:0.12,h:0.05},
+      Tue:{x:0.22,y:0.30,w:0.12,h:0.05},
+      Wed:{x:0.34,y:0.30,w:0.12,h:0.05},
+      Thu:{x:0.46,y:0.30,w:0.12,h:0.05},
+      Fri:{x:0.58,y:0.30,w:0.12,h:0.05},
+      totalWeek:{x:0.70,y:0.80,w:0.25,h:0.05}
     };
 
-    photoInput.addEventListener('change', () => {
-      errorMsg.style.display = 'none';
-      ocrResult.style.display = 'none';
-      downloadCsv.style.display = 'none';
-      if (photoInput.files[0]) {
+    photoInput.addEventListener('change',()=>{
+      errorMsg.style.display='none';
+      ocrResult.style.display='none';
+      downloadCsv.style.display='none';
+      if(photoInput.files[0]){
         const reader = new FileReader();
-        reader.onload = e => {
+        reader.onload = e=>{
           const img = new Image();
-          img.onload = () => {
-            canvas.style.display = 'block';
-            canvas.width  = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            const ctx = canvas.getContext('2d');
+          img.onload=()=>{
+            canvas.style.display='block';
+            canvas.width=img.naturalWidth;
+            canvas.height=img.naturalHeight;
+            const ctx=canvas.getContext('2d');
             ctx.drawImage(img,0,0);
-            // Only enable OCR if OpenCV is ready
-            ocrBtn.disabled = !window.cvReady;
+            ocrBtn.disabled=!window.cvReady;
           };
-          img.src = e.target.result;
+          img.src=e.target.result;
         };
         reader.readAsDataURL(photoInput.files[0]);
       }
     });
 
-    function fullPreprocess(src) {
-      // Convert to grayscale
-      const gray = new cv.Mat();
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+    circleInput.addEventListener('change',()=>{
+      circleResult.style.display='none';
+      if(circleInput.files[0]){
+        const reader=new FileReader();
+        reader.onload=e=>{
+          const img=new Image();
+          img.onload=()=>{
+            circleCanvas.style.display='block';
+            circleCanvas.width=img.naturalWidth;
+            circleCanvas.height=img.naturalHeight;
+            const ctx=circleCanvas.getContext('2d');
+            ctx.drawImage(img,0,0);
+            circleBtn.disabled=!window.cvReady;
+          };
+          img.src=e.target.result;
+        };
+        reader.readAsDataURL(circleInput.files[0]);
+      }
+    });
 
-      // Adaptive threshold
-      const thresh = new cv.Mat();
-      cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 15, 10);
-
-      gray.delete();
-      src.delete();
-
+    function fullPreprocess(src){
+      const gray=new cv.Mat();
+      cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY,0);
+      const thresh=new cv.Mat();
+      cv.adaptiveThreshold(gray,thresh,255,cv.ADAPTIVE_THRESH_GAUSSIAN_C,cv.THRESH_BINARY,15,10);
+      gray.delete(); src.delete();
       return thresh;
     }
 
-    // Convert canvas image to Uint8Array for Textract
-    function canvasToBytes(canvas) {
-      return new Promise(resolve => {
-        canvas.toBlob(blob => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(new Uint8Array(reader.result));
+    function canvasToBytes(canvas){
+      return new Promise(resolve=>{
+        canvas.toBlob(blob=>{
+          const reader=new FileReader();
+          reader.onload=()=>resolve(new Uint8Array(reader.result));
           reader.readAsArrayBuffer(blob);
-        }, 'image/png');
+        },'image/png');
       });
     }
 
-    // Parse Textract TABLE blocks into CSV
-    function textractToCSV(data) {
-      const blocks = data.Blocks || [];
-      const blockMap = {};
-      blocks.forEach(b => blockMap[b.Id] = b);
-      const tables = blocks.filter(b => b.BlockType === 'TABLE');
-      const csvRows = [];
-      tables.forEach(table => {
-        const cells = [];
-        (table.Relationships || []).forEach(rel => {
-          if (rel.Type === 'CHILD') {
-            rel.Ids.forEach(id => {
-              const cell = blockMap[id];
-              if (cell.BlockType === 'CELL') cells.push(cell);
+    function textractToCSV(data){
+      const blocks=data.Blocks||[];
+      const blockMap={};
+      blocks.forEach(b=>blockMap[b.Id]=b);
+      const tables=blocks.filter(b=>b.BlockType==='TABLE');
+      const csvRows=[];
+      tables.forEach(table=>{
+        const cells=[];
+        (table.Relationships||[]).forEach(rel=>{
+          if(rel.Type==='CHILD'){
+            rel.Ids.forEach(id=>{
+              const cell=blockMap[id];
+              if(cell.BlockType==='CELL') cells.push(cell);
             });
           }
         });
-        const maxRow = Math.max(...cells.map(c => c.RowIndex), 0);
-        const rows = Array.from({length: maxRow}, () => []);
-        cells.forEach(cell => {
-          let text = '';
-          (cell.Relationships || []).forEach(rel => {
-            if (rel.Type === 'CHILD') {
-              rel.Ids.forEach(id => {
-                const word = blockMap[id];
-                if (word.BlockType === 'WORD') text += word.Text + ' ';
+        const maxRow=Math.max(...cells.map(c=>c.RowIndex),0);
+        const rows=Array.from({length:maxRow},()=>[]);
+        cells.forEach(cell=>{
+          let text='';
+          (cell.Relationships||[]).forEach(rel=>{
+            if(rel.Type==='CHILD'){
+              rel.Ids.forEach(id=>{
+                const word=blockMap[id];
+                if(word.BlockType==='WORD') text+=word.Text+' ';
               });
             }
           });
-          rows[cell.RowIndex - 1][cell.ColumnIndex - 1] = text.trim();
+          rows[cell.RowIndex-1][cell.ColumnIndex-1]=text.trim();
         });
-        rows.forEach(row => csvRows.push(row.join(',')));
+        rows.forEach(row=>csvRows.push(row.join(',')));
       });
       return csvRows.join('\n');
     }
 
-    // Extract specific field regions and run Textract on each
-    async function extractFields(canvas, fields, textract) {
-      const results = {};
-      for (const [name, rect] of Object.entries(fields)) {
-        const ox = Math.round(canvas.width * rect.x);
-        const oy = Math.round(canvas.height * rect.y);
-        const ow = Math.round(canvas.width * rect.w);
-        const oh = Math.round(canvas.height * rect.h);
-        const off = document.createElement('canvas');
-        off.width = ow; off.height = oh;
-        const ctx = off.getContext('2d');
-        ctx.drawImage(canvas, ox, oy, ow, oh, 0, 0, ow, oh);
-
-        const bytes = await canvasToBytes(off);
-        try {
-          const data = await textract.detectDocumentText({
-            Document: { Bytes: bytes }
-          }).promise();
-          const lines = (data.Blocks || [])
-            .filter(b => b.BlockType === 'LINE')
-            .map(b => b.Text);
-          results[name] = lines.join(' ');
-        } catch (e) {
-          results[name] = '';
-        }
+    async function extractFields(canvas,fields,textract){
+      const results={};
+      for(const [name,rect] of Object.entries(fields)){
+        const ox=Math.round(canvas.width*rect.x);
+        const oy=Math.round(canvas.height*rect.y);
+        const ow=Math.round(canvas.width*rect.w);
+        const oh=Math.round(canvas.height*rect.h);
+        const off=document.createElement('canvas');
+        off.width=ow; off.height=oh;
+        const ctx=off.getContext('2d');
+        ctx.drawImage(canvas,ox,oy,ow,oh,0,0,ow,oh);
+        const bytes=await canvasToBytes(off);
+        try{
+          const data=await textract.detectDocumentText({Document:{Bytes:bytes}}).promise();
+          const lines=(data.Blocks||[]).filter(b=>b.BlockType==='LINE').map(b=>b.Text);
+          results[name]=lines.join(' ');
+        }catch(e){ results[name]=''; }
       }
       return results;
     }
 
-    ocrBtn.addEventListener('click', async () => {
-      if (!window.cvReady) return alert('Processing library still loading');
-      errorMsg.style.display = 'none';
-      ocrResult.style.display = 'none';
-      downloadCsv.style.display = 'none';
-      ocrBtn.disabled = true;
-      ocrBtn.textContent = 'Recognizing...';
-      progressEl.value = 0;
-      progressEl.style.display = 'block';
+    ocrBtn.addEventListener('click',async()=>{
+      if(!window.cvReady) return alert('Processing library still loading');
+      errorMsg.style.display='none';
+      ocrResult.style.display='none';
+      downloadCsv.style.display='none';
+      ocrBtn.disabled=true;
+      ocrBtn.textContent='Recognizing...';
+      progressEl.value=0;
+      progressEl.style.display='block';
 
-      // Read canvas into OpenCV Mat and preprocess
-      let src = cv.imread(canvas);
-      let proc = fullPreprocess(src);
-      cv.imshow(canvas, proc);
+      let src=cv.imread(canvas);
+      let proc=fullPreprocess(src);
+      cv.imshow(canvas,proc);
       proc.delete();
 
-      // Convert canvas to bytes for Textract
-      let bytes = await canvasToBytes(canvas);
+      let bytes=await canvasToBytes(canvas);
 
-      // Configure AWS credentials (replace with your setup)
-      AWS.config.region = 'us-east-1';
-      // Credentials should be provided via Cognito Identity Pool or other secure method
-      // Example using environment variables: AWS.config.credentials = new AWS.Credentials('ACCESS_KEY','SECRET_KEY');
-
-      const textract = new AWS.Textract();
+      AWS.config.region='us-east-1';
+      const textract=new AWS.Textract();
       let data;
-      try {
-        data = await textract.analyzeDocument({
-          Document: { Bytes: bytes },
-          FeatureTypes: ['TABLES']
+      try{
+        data=await textract.analyzeDocument({
+          Document:{Bytes:bytes},
+          FeatureTypes:['TABLES']
         }).promise();
-      } catch (err) {
-        progressEl.style.display = 'none';
-        ocrBtn.textContent = 'Recognize Timesheet';
-        ocrBtn.disabled = false;
-        errorMsg.textContent = err.message || 'Textract failed';
-        errorMsg.style.display = 'block';
+      }catch(err){
+        progressEl.style.display='none';
+        ocrBtn.textContent='Recognize Timesheet';
+        ocrBtn.disabled=false;
+        errorMsg.textContent=err.message||'Textract failed';
+        errorMsg.style.display='block';
         return;
       }
 
-      progressEl.value = 1;
+      progressEl.value=1;
 
-      const fieldsData = await extractFields(canvas, templateFields, textract);
-      const tableCsv = textractToCSV(data);
-      let csv = 'Field,Value\n';
-      Object.entries(fieldsData).forEach(([k,v]) => {
-        csv += `${k},${v}\n`;
-      });
-      csv += `\n${tableCsv}`;
-      ocrResult.textContent = csv;
-      ocrResult.style.display = 'block';
+      const fieldsData=await extractFields(canvas,templateFields,textract);
+      const tableCsv=textractToCSV(data);
+      let csv='Field,Value\n';
+      Object.entries(fieldsData).forEach(([k,v])=>{ csv+=`${k},${v}\n`; });
+      csv+=`\n${tableCsv}`;
+      ocrResult.textContent=csv;
+      ocrResult.style.display='block';
 
-      progressEl.style.display = 'none';
-      ocrBtn.textContent = 'Recognize Timesheet';
-      ocrBtn.disabled = false;
-      downloadCsv.style.display = 'block';
-      downloadCsv.onclick = () => {
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'timesheet_hours.csv'; a.click(); URL.revokeObjectURL(url);
+      progressEl.style.display='none';
+      ocrBtn.textContent='Recognize Timesheet';
+      ocrBtn.disabled=false;
+      downloadCsv.style.display='block';
+      downloadCsv.onclick=()=>{
+        const blob=new Blob([csv],{type:'text/csv'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a'); a.href=url; a.download='timesheet_hours.csv'; a.click(); URL.revokeObjectURL(url);
       };
+    });
+
+    circleBtn.addEventListener('click',()=>{
+      if(!window.cvReady) return alert('Processing library still loading');
+      circleBtn.disabled=true;
+      circleBtn.textContent='Recognizing...';
+
+      let src=cv.imread(circleCanvas);
+      let gray=new cv.Mat();
+      cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY,0);
+      cv.GaussianBlur(gray,gray,new cv.Size(5,5),0,0,cv.BORDER_DEFAULT);
+      let circles=new cv.Mat();
+      cv.HoughCircles(gray,circles,cv.HOUGH_GRADIENT,1,20,100,15,5,15);
+
+      let filled=[];
+      for(let i=0;i<circles.cols;i++){
+        let x=circles.data32F[i*3];
+        let y=circles.data32F[i*3+1];
+        let r=circles.data32F[i*3+2];
+        let mask=cv.Mat.zeros(gray.rows,gray.cols,cv.CV_8UC1);
+        cv.circle(mask,new cv.Point(x,y),r*0.6,new cv.Scalar(255,255,255,255),-1);
+        let mean=cv.mean(gray,mask)[0];
+        mask.delete();
+        if(mean<128) filled.push({x,y});
+      }
+      circles.delete(); gray.delete(); src.delete();
+
+      filled.sort((a,b)=>a.y-b.y);
+      let rowCenters=[];
+      filled.forEach(c=>{
+        let row=rowCenters.findIndex(rc=>Math.abs(rc-c.y)<20);
+        if(row===-1) rowCenters.push(c.y);
+      });
+      rowCenters.sort((a,b)=>a-b);
+      let rows=rowCenters.length;
+      let cols=7;
+      let counts=Array.from({length:rows},()=>Array(cols).fill(0));
+      filled.forEach(c=>{
+        let row=rowCenters.findIndex(rc=>Math.abs(rc-c.y)<20);
+        let col=Math.min(cols-1,Math.floor(c.x/(circleCanvas.width/cols)));
+        if(row>=0) counts[row][col]++;
+      });
+      let csv='Row,Sun,Mon,Tue,Wed,Thu,Fri,Sat\n';
+      counts.forEach((rowArr,i)=>{ csv+=(i+1)+','+rowArr.join(',')+'\n'; });
+      circleResult.textContent=csv||'No circles detected';
+      circleResult.style.display='block';
+      circleBtn.textContent='Recognize Circles';
+      circleBtn.disabled=false;
     });
   </script>
 </body>
