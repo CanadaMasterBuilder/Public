@@ -64,7 +64,10 @@
       <input type="file" accept="image/*" capture="environment" id="circleInput">
       <canvas id="circleCanvas" style="display:none;"></canvas>
       <button id="circleBtn" disabled>Recognize Circles</button>
-      <pre id="circleResult" class="result" style="display:none;"></pre>
+      <pre id="circleRaw" class="result" style="display:none;"></pre>
+      <div id="circleTable" style="display:none;overflow-x:auto;"></div>
+      <pre id="circleCsv" class="result" style="display:none;"></pre>
+      <button id="downloadCircleCsv" style="display:none;">Download CSV</button>
     </div>
   </div>
   <script>
@@ -76,10 +79,13 @@
     const errorMsg    = document.getElementById('errorMsg');
     const downloadCsv = document.getElementById('downloadCsv');
 
-    const circleInput  = document.getElementById('circleInput');
-    const circleCanvas = document.getElementById('circleCanvas');
-    const circleBtn    = document.getElementById('circleBtn');
-    const circleResult = document.getElementById('circleResult');
+    const circleInput   = document.getElementById('circleInput');
+    const circleCanvas  = document.getElementById('circleCanvas');
+    const circleBtn     = document.getElementById('circleBtn');
+    const circleRaw     = document.getElementById('circleRaw');
+    const circleTable   = document.getElementById('circleTable');
+    const circleCsv     = document.getElementById('circleCsv');
+    const downloadCircleCsv = document.getElementById('downloadCircleCsv');
 
     // Define template fields for normal sheet
     const templateFields = {
@@ -116,7 +122,10 @@
     });
 
     circleInput.addEventListener('change',()=>{
-      circleResult.style.display='none';
+      circleRaw.style.display='none';
+      circleTable.style.display='none';
+      circleCsv.style.display='none';
+      downloadCircleCsv.style.display='none';
       if(circleInput.files[0]){
         const reader=new FileReader();
         reader.onload=e=>{
@@ -265,7 +274,7 @@
       };
     });
 
-    circleBtn.addEventListener('click',()=>{
+    circleBtn.addEventListener('click',async()=>{
       if(!window.cvReady) return alert('Processing library still loading');
       circleBtn.disabled=true;
       circleBtn.textContent='Recognizing...';
@@ -305,10 +314,44 @@
         let col=Math.min(cols-1,Math.floor(c.x/(circleCanvas.width/cols)));
         if(row>=0) counts[row][col]++;
       });
-      let csv='Row,Sun,Mon,Tue,Wed,Thu,Fri,Sat\n';
+      AWS.config.region='us-east-1';
+      const textract=new AWS.Textract();
+      let textData;
+      try{
+        const bytes=await canvasToBytes(circleCanvas);
+        textData=await textract.detectDocumentText({Document:{Bytes:bytes}}).promise();
+      }catch(e){ textData={}; }
+      const lines=(textData.Blocks||[]).filter(b=>b.BlockType==='LINE').map(b=>b.Text);
+      circleRaw.textContent=JSON.stringify({circles:filled, lines},null,2) || 'No data';
+      circleRaw.style.display='block';
+      let nameLine=lines.find(l=>/name/i.test(l))||'';
+      let name=nameLine.split(/name[:\s]*/i)[1]||'';
+      let dateLine=lines.find(l=>{ const nums=l.match(/\d+/g); return nums&&nums.length>=7; })||'';
+      let dates=(dateLine.match(/\d+/g)||[]).slice(0,7);
+
+      let tableHtml='<table border="1" style="width:100%;text-align:center;">';
+      tableHtml+='<thead><tr><th>Name</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th></tr>';
+      tableHtml+='<tr><td>'+name+'</td>'+(dates.length===7?dates.map(d=>'<td>'+d+'</td>').join(''):Array(7).fill('<td></td>').join(''))+'</tr></thead><tbody>';
+      counts.forEach((rowArr,i)=>{ tableHtml+='<tr><td>Row '+(i+1)+'</td>'+rowArr.map(c=>'<td>'+c+'</td>').join('')+'</tr>'; });
+      tableHtml+='</tbody></table>';
+      circleTable.innerHTML=tableHtml;
+      circleTable.style.display='block';
+
+      let csv='Name,'+name+'\n';
+      if(dates.length===7) csv+='Date,'+dates.join(',')+'\n';
+      csv+='Row,Sun,Mon,Tue,Wed,Thu,Fri,Sat\n';
       counts.forEach((rowArr,i)=>{ csv+=(i+1)+','+rowArr.join(',')+'\n'; });
-      circleResult.textContent=csv||'No circles detected';
-      circleResult.style.display='block';
+      circleCsv.textContent=csv;
+      circleCsv.style.display='block';
+      downloadCircleCsv.style.display='block';
+      downloadCircleCsv.onclick=()=>{
+        const blob=new Blob([csv],{type:'text/csv'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url; a.download='circle_timesheet.csv'; a.click();
+        URL.revokeObjectURL(url);
+      };
+
       circleBtn.textContent='Recognize Circles';
       circleBtn.disabled=false;
     });
