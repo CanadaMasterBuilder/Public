@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Employee Timesheet Entry</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
+  <style>
+    body{font-family:Arial, sans-serif;margin:20px;}
+    table{border-collapse:collapse;width:100%;max-width:100%;}
+    th,td{border:1px solid #ccc;padding:8px;text-align:center;}
+    th{background:#f0f0f0;}
+    input[type="number"]{width:60px;}
+    tfoot td, tfoot th{font-weight:bold;}
+    #controls{margin-top:20px;}
+    #employee-info label{margin-right:15px;}
+  </style>
+</head>
+<body>
+  <h1>Timesheet Entry</h1>
+  <div id="employee-info">
+    <label>Name: <input type="text" id="employeeName"></label>
+    <label>Email: <input type="email" id="employeeEmail"></label>
+    <label>Week Starting: <input type="date" id="weekStart"></label>
+  </div>
+  <table id="timesheet">
+    <thead>
+      <tr>
+        <th>Time Code</th>
+        <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody id="timesheet-body"></tbody>
+    <tfoot>
+      <tr>
+        <th>Daily Total</th>
+        <td id="total-sun">0</td><td id="total-mon">0</td><td id="total-tue">0</td><td id="total-wed">0</td><td id="total-thu">0</td><td id="total-fri">0</td><td id="total-sat">0</td>
+        <td id="grand-total">0</td>
+      </tr>
+    </tfoot>
+  </table>
+  <div id="controls">
+    <button id="addCodeBtn">Add Time Code</button>
+    <button id="submitBtn">Submit Timesheet</button>
+  </div>
+<script>
+  // Initialize EmailJS (replace with your public key)
+  emailjs.init('YOUR_PUBLIC_KEY');
+
+  const days=['sun','mon','tue','wed','thu','fri','sat'];
+  const predefinedCodes=['Regular','Overtime','Vacation','Sick'];
+  const body=document.getElementById('timesheet-body');
+
+  function addRow(code){
+    const tr=document.createElement('tr');
+    tr.innerHTML='<th>'+code+'</th>' +
+      days.map(d=>`<td><input type="number" min="0" step="0.25" value="0" data-day="${d}"></td>`).join('') +
+      '<td class="row-total">0</td>';
+    body.appendChild(tr);
+    tr.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',updateTotals));
+  }
+
+  predefinedCodes.forEach(addRow);
+
+  document.getElementById('addCodeBtn').addEventListener('click',()=>{
+    const code=prompt('Enter new time code:');
+    if(code) addRow(code.trim());
+  });
+
+  function updateTotals(){
+    let grand=0;
+    const dayTotals=Object.fromEntries(days.map(d=>[d,0]));
+    body.querySelectorAll('tr').forEach(row=>{
+      let rowTotal=0;
+      row.querySelectorAll('input').forEach(inp=>{
+        const val=parseFloat(inp.value)||0;
+        rowTotal+=val;
+        dayTotals[inp.dataset.day]+=val;
+      });
+      row.querySelector('.row-total').textContent=rowTotal.toFixed(2);
+      grand+=rowTotal;
+    });
+    days.forEach(d=>document.getElementById('total-'+d).textContent=dayTotals[d].toFixed(2));
+    document.getElementById('grand-total').textContent=grand.toFixed(2);
+    return grand;
+  }
+
+  document.getElementById('submitBtn').addEventListener('click',()=>{
+    const total=updateTotals();
+    const name=document.getElementById('employeeName').value.trim();
+    const email=document.getElementById('employeeEmail').value.trim();
+    const week=document.getElementById('weekStart').value;
+    if(!name||!email||!week){
+      alert('Please fill out name, email, and week starting date.');
+      return;
+    }
+    if(!confirm(`Submit timesheet totaling ${total.toFixed(2)} hours?`)){
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const pdf=new jsPDF();
+    pdf.text(`Timesheet for ${name}`,10,10);
+    pdf.text(`Week Starting: ${week}`,10,20);
+    pdf.autoTable({html:'#timesheet',startY:30});
+    const pdfBase64=pdf.output('datauristring');
+
+    emailjs.send('YOUR_SERVICE_ID','YOUR_TEMPLATE_ID',{
+      to_email:email,
+      message:'Attached is your timesheet.',
+      attachment:pdfBase64
+    }).then(()=>{
+      alert('Timesheet emailed to you.');
+    }).catch(err=>{
+      console.error(err);
+      alert('Failed to send email.');
+    });
+  });
+</script>
+</body>
+</html>
