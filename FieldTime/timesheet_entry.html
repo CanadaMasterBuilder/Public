@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Employee Timesheet Entry</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
+  <style>
+    body{font-family:Arial, sans-serif;margin:20px;}
+    table{border-collapse:collapse;width:100%;max-width:100%;}
+    th,td{border:1px solid #ccc;padding:8px;text-align:center;}
+    th{background:#f0f0f0;}
+    .code-cell{text-align:left;font-weight:normal;font-size:0.9em;}
+    input[type="number"]{width:60px;}
+    tfoot td, tfoot th{font-weight:bold;}
+    #controls{margin-top:20px;}
+    #employee-info label{margin-right:15px;}
+  </style>
+</head>
+<body>
+  <h1>Timesheet Entry</h1>
+  <div id="employee-info">
+    <label>Name: <input type="text" id="employeeName"></label>
+    <label>Email: <input type="email" id="employeeEmail"></label>
+    <label>Week Starting: <input type="date" id="weekStart" step="7"></label>
+  </div>
+  <table id="timesheet">
+    <thead>
+      <tr>
+        <th>Time Code</th>
+        <th id="label-sun" class="day-header">Sun</th>
+        <th id="label-mon" class="day-header">Mon</th>
+        <th id="label-tue" class="day-header">Tue</th>
+        <th id="label-wed" class="day-header">Wed</th>
+        <th id="label-thu" class="day-header">Thu</th>
+        <th id="label-fri" class="day-header">Fri</th>
+        <th id="label-sat" class="day-header">Sat</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody id="timesheet-body"></tbody>
+    <tfoot>
+      <tr>
+        <th>Daily Total</th>
+        <td id="total-sun">0</td><td id="total-mon">0</td><td id="total-tue">0</td><td id="total-wed">0</td><td id="total-thu">0</td><td id="total-fri">0</td><td id="total-sat">0</td>
+        <td id="grand-total">0</td>
+      </tr>
+    </tfoot>
+  </table>
+  <div id="controls">
+    <button id="addCodeBtn">Add Time Code</button>
+    <button id="submitBtn">Submit Timesheet</button>
+  </div>
+<script>
+  // Initialize EmailJS (replace with your public key)
+  emailjs.init('YOUR_PUBLIC_KEY');
+
+  const days=['sun','mon','tue','wed','thu','fri','sat'];
+  const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const weekStartInput=document.getElementById('weekStart');
+
+  function updateDayLabels(start){
+    if(!start) return;
+    const base=new Date(start);
+    dayNames.forEach((name,i)=>{
+      const d=new Date(base);
+      d.setDate(base.getDate()+i);
+      const mm=String(d.getMonth()+1).padStart(2,'0');
+      const dd=String(d.getDate()).padStart(2,'0');
+      document.getElementById('label-'+days[i]).textContent=`${name} ${mm}/${dd}`;
+    });
+  }
+
+  function initWeekStart(){
+    const today=new Date();
+    const lastSunday=new Date(today);
+    lastSunday.setDate(today.getDate()-today.getDay());
+    weekStartInput.valueAsDate=lastSunday;
+    const min=new Date(lastSunday);
+    min.setMonth(min.getMonth()-6);
+    weekStartInput.min=min.toISOString().split('T')[0];
+    weekStartInput.step=7;
+    updateDayLabels(weekStartInput.value);
+  }
+
+  weekStartInput.addEventListener('change',()=>{
+    const selected=new Date(weekStartInput.value);
+    if(selected.getDay()!==0){
+      selected.setDate(selected.getDate()-selected.getDay());
+      weekStartInput.valueAsDate=selected;
+    }
+    updateDayLabels(weekStartInput.value);
+  });
+
+  initWeekStart();
+
+  const predefinedCodes=[
+    '1060 FOREMAN',
+    '1112 Man Hoist',
+    '1210 TEMPORARY BUILDINGS / FILL WATER',
+    '1225 TEMP HEAT- EQUIP',
+    '1235 TEMP POWER - EQUIP',
+    '1255 SAFETY & FIRE PROTEC',
+    '1320 SURVEY & LAYOUT',
+    '1345 PROGRESSIVE CLEAN-UP',
+    '1370 SNOW REMOVAL',
+    '2125 SITE EXCAVATION',
+    '2145 EXCAVATION INCIDENTALS',
+    '2950 HARD LANDSCAPE',
+    '3140 FORM-EQUIPMENT PADS',
+    '3201 REINFORCE STEEL/MESH',
+    '3401 CONCRETE FINISHING',
+    '3735 GROUT',
+    '6210 BLOCKING & BACKING',
+    '7215 INSULATION/SPRAY FOAM',
+    '7910 CAULKING',
+    '8100 METAL DOORS & FRAMES',
+    '8710 HARDWARE',
+    '10900 ACCESSORIES/ OWNER SUPPLIED (INTERIOR FINISHES)',
+    '17940 GR-FENCES/BARRICADES',
+    '18003 A.I. TEMP STORAGE',
+    '18008 IPC',
+    '18036 PCO 149R1- TRANSFER BEAMS & CONTROL JOINTS',
+    '18040 BASE CONTRACT EXTERIOR CONCRETE',
+    '18071 WAREHOUSE 1',
+    '18118 PARAPETS/ROOF CURBS/ LIGHTNING PROTECTION',
+    '18120 IPC REIMBURSABLE',
+    '18468 BONDO',
+    '18483 HAND SANITIZER BACKING',
+    '18484 PCO 212 Building Additions',
+    '19024 Green Drywall Removal',
+    '19015 Modified Duties'
+  ];
+  const body=document.getElementById('timesheet-body');
+  const QUEUE_ENDPOINT='YOUR_QUEUE_ENDPOINT';
+
+  function addRow(code){
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td class="code-cell">'+code+'</td>' +
+      days.map(d=>`<td><input type="number" min="0" step="0.25" value="0" data-day="${d}"></td>`).join('') +
+      '<td class="row-total">0</td>';
+    body.appendChild(tr);
+    tr.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',updateTotals));
+  }
+
+  predefinedCodes.forEach(addRow);
+
+  document.getElementById('addCodeBtn').addEventListener('click',()=>{
+    const code=prompt('Enter new time code:');
+    if(code) addRow(code.trim());
+  });
+
+  function updateTotals(){
+    let grand=0;
+    const dayTotals=Object.fromEntries(days.map(d=>[d,0]));
+    body.querySelectorAll('tr').forEach(row=>{
+      let rowTotal=0;
+      row.querySelectorAll('input').forEach(inp=>{
+        const val=parseFloat(inp.value)||0;
+        rowTotal+=val;
+        dayTotals[inp.dataset.day]+=val;
+      });
+      row.querySelector('.row-total').textContent=rowTotal.toFixed(2);
+      grand+=rowTotal;
+    });
+    days.forEach(d=>document.getElementById('total-'+d).textContent=dayTotals[d].toFixed(2));
+    document.getElementById('grand-total').textContent=grand.toFixed(2);
+    return grand;
+  }
+
+  document.getElementById('submitBtn').addEventListener('click',async ()=>{
+    const total=updateTotals();
+    const name=document.getElementById('employeeName').value.trim();
+    const email=document.getElementById('employeeEmail').value.trim();
+    const week=document.getElementById('weekStart').value;
+    if(!name||!email||!week){
+      alert('Please fill out name, email, and week starting date.');
+      return;
+    }
+    if(!confirm(`Submit timesheet totaling ${total.toFixed(2)} hours?`)){
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const pdf=new jsPDF();
+    pdf.text(`Timesheet for ${name}`,10,10);
+    pdf.text(`Week Starting: ${week}`,10,20);
+    pdf.autoTable({html:'#timesheet',startY:30});
+    const pdfBase64=pdf.output('datauristring');
+
+    const entries=[];
+    body.querySelectorAll('tr').forEach(row=>{
+      const header=row.querySelector('.code-cell').textContent;
+      const [code,...descParts]=header.split(' ');
+      const entry={code,description:descParts.join(' '),hours:{}};
+      let rowTotal=0;
+      row.querySelectorAll('input').forEach(inp=>{
+        const val=parseFloat(inp.value)||0;
+        entry.hours[inp.dataset.day]=val;
+        rowTotal+=val;
+      });
+      entry.total=rowTotal;
+      entries.push(entry);
+    });
+
+    const payload={name,email,weekStart:week,totalHours:total,entries};
+    const queuePromise=fetch(QUEUE_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const emailPromise=emailjs.send('YOUR_SERVICE_ID','YOUR_TEMPLATE_ID',{
+      to_email:email,
+      message:'Attached is your timesheet.',
+      attachment:pdfBase64
+    });
+
+    Promise.all([queuePromise,emailPromise]).then(()=>{
+      alert('Timesheet submitted and emailed to you.');
+    }).catch(err=>{
+      console.error(err);
+      alert('Failed to submit timesheet.');
+    });
+  });
+</script>
+</body>
+</html>
