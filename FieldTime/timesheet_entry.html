@@ -51,8 +51,45 @@
   emailjs.init('YOUR_PUBLIC_KEY');
 
   const days=['sun','mon','tue','wed','thu','fri','sat'];
-  const predefinedCodes=['Regular','Overtime','Vacation','Sick'];
+  const predefinedCodes=[
+    '1060 FOREMAN',
+    '1112 Man Hoist',
+    '1210 TEMPORARY BUILDINGS / FILL WATER',
+    '1225 TEMP HEAT- EQUIP',
+    '1235 TEMP POWER - EQUIP',
+    '1255 SAFETY & FIRE PROTEC',
+    '1320 SURVEY & LAYOUT',
+    '1345 PROGRESSIVE CLEAN-UP',
+    '1370 SNOW REMOVAL',
+    '2125 SITE EXCAVATION',
+    '2145 EXCAVATION INCIDENTALS',
+    '2950 HARD LANDSCAPE',
+    '3140 FORM-EQUIPMENT PADS',
+    '3201 REINFORCE STEEL/MESH',
+    '3401 CONCRETE FINISHING',
+    '3735 GROUT',
+    '6210 BLOCKING & BACKING',
+    '7215 INSULATION/SPRAY FOAM',
+    '7910 CAULKING',
+    '8100 METAL DOORS & FRAMES',
+    '8710 HARDWARE',
+    '10900 ACCESSORIES/ OWNER SUPPLIED (INTERIOR FINISHES)',
+    '17940 GR-FENCES/BARRICADES',
+    '18003 A.I. TEMP STORAGE',
+    '18008 IPC',
+    '18036 PCO 149R1- TRANSFER BEAMS & CONTROL JOINTS',
+    '18040 BASE CONTRACT EXTERIOR CONCRETE',
+    '18071 WAREHOUSE 1',
+    '18118 PARAPETS/ROOF CURBS/ LIGHTNING PROTECTION',
+    '18120 IPC REIMBURSABLE',
+    '18468 BONDO',
+    '18483 HAND SANITIZER BACKING',
+    '18484 PCO 212 Building Additions',
+    '19024 Green Drywall Removal',
+    '19015 Modified Duties'
+  ];
   const body=document.getElementById('timesheet-body');
+  const QUEUE_ENDPOINT='YOUR_QUEUE_ENDPOINT';
 
   function addRow(code){
     const tr=document.createElement('tr');
@@ -88,7 +125,7 @@
     return grand;
   }
 
-  document.getElementById('submitBtn').addEventListener('click',()=>{
+  document.getElementById('submitBtn').addEventListener('click',async ()=>{
     const total=updateTotals();
     const name=document.getElementById('employeeName').value.trim();
     const email=document.getElementById('employeeEmail').value.trim();
@@ -107,15 +144,38 @@
     pdf.autoTable({html:'#timesheet',startY:30});
     const pdfBase64=pdf.output('datauristring');
 
-    emailjs.send('YOUR_SERVICE_ID','YOUR_TEMPLATE_ID',{
+    const entries=[];
+    body.querySelectorAll('tr').forEach(row=>{
+      const header=row.querySelector('th').textContent;
+      const [code,...descParts]=header.split(' ');
+      const entry={code,description:descParts.join(' '),hours:{}};
+      let rowTotal=0;
+      row.querySelectorAll('input').forEach(inp=>{
+        const val=parseFloat(inp.value)||0;
+        entry.hours[inp.dataset.day]=val;
+        rowTotal+=val;
+      });
+      entry.total=rowTotal;
+      entries.push(entry);
+    });
+
+    const payload={name,email,weekStart:week,totalHours:total,entries};
+    const queuePromise=fetch(QUEUE_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const emailPromise=emailjs.send('YOUR_SERVICE_ID','YOUR_TEMPLATE_ID',{
       to_email:email,
       message:'Attached is your timesheet.',
       attachment:pdfBase64
-    }).then(()=>{
-      alert('Timesheet emailed to you.');
+    });
+
+    Promise.all([queuePromise,emailPromise]).then(()=>{
+      alert('Timesheet submitted and emailed to you.');
     }).catch(err=>{
       console.error(err);
-      alert('Failed to send email.');
+      alert('Failed to submit timesheet.');
     });
   });
 </script>
