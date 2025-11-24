@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cocktail Kiosk</title>
+<style>
+body{background:#0f0f11;color:#f4f4f5;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif}
+header{position:sticky;top:0;background:#0f0f11d9;border-bottom:1px solid #2a2a2f;backdrop-filter:blur(6px);z-index:5;display:flex;justify-content:space-between;align-items:center;padding:10px 20px}
+.wrap{max-width:1000px;margin:0 auto;padding:16px}
+.btn{padding:14px;border-radius:10px;border:1px solid #34343a;background:#1d1d21;color:#fff;cursor:pointer;min-width:200px;text-align:center;font-size:1.05rem;margin:5px;position:relative}
+.btn:hover{background:#23232a}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;justify-items:center}
+.card{border:1px solid #2a2a2f;border-radius:16px;background:#16161a;overflow:hidden;display:flex;flex-direction:column;width:280px}
+.thumb{width:100%;aspect-ratio:4/3;object-fit:cover;background:#23232a}
+.card-body{padding:12px;display:flex;flex-direction:column;gap:8px}
+.meta{font-size:12px;opacity:.85}
+.footer{margin-top:auto;display:flex;justify-content:center}
+</style>
+</head>
+<body>
+<header><h1>🍸 Cocktail Kiosk</h1></header>
+<main class="wrap">
+  <div id="prompt" style="font-size:1.3rem;text-align:center;margin:10px 0;"></div>
+  <div id="grid" class="grid"></div>
+  <div style="display:flex;justify-content:center"><button class="btn" id="aiBtn" style="display:none;">🔮 Ask AI for 9 Custom Cocktails</button></div>
+</main>
+<script>
+const state={data:[],page:0};
+
+/* ---------- Load makeable cocktails ---------- */
+function startApp(){
+  google.script.run.withSuccessHandler(data=>{
+    state.data=data.menu;
+    document.getElementById('prompt').textContent="Available cocktails ("+state.data.length+")";
+    renderPage();
+    document.getElementById('aiBtn').style.display='block';
+  }).getMenu();
+}
+function renderPage(){
+  const grid=document.getElementById('grid');
+  grid.innerHTML='';
+  state.data.slice(0,9).forEach(c=>{
+    const el=document.createElement('div');
+    el.className='card';
+    el.innerHTML=`
+      <img class="thumb" src="${c.image}" onerror="this.style.display='none'"/>
+      <div class="card-body">
+        <div class="title" style="font-weight:600">${c.name}</div>
+        <div class="meta">${c.category} · ${c.glass}</div>
+        <div class="footer"><button class="btn" onclick="showDrink('${encodeURIComponent(c.name)}')">View</button></div>
+      </div>`;
+    grid.appendChild(el);
+  });
+}
+
+/* ---------- Show AI Recommendation ---------- */
+async function askAI(){
+  const makeable=state.data.map(d=>({name:d.name,ingredients:d.ingredients}));
+  const userPrompt=prompt("Describe your mood, flavor, or occasion for recommendations:","");
+  const promptText=`
+You are a mixologist. Only choose cocktails from this list that can actually be made:
+${JSON.stringify(makeable.slice(0,200))}
+Recommend 9 cocktails that match this mood or request:
+"${userPrompt}"
+For each include:
+- Name
+- Short description
+- Ingredients
+- Instructions
+Return as JSON array of 9 objects.`;
+
+  document.getElementById('prompt').textContent="Asking AI bartender...";
+  const resp=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "Authorization":"Bearer YOUR_API_KEY_HERE"
+    },
+    body:JSON.stringify({
+      model:"gpt-4-turbo",
+      messages:[{role:"user",content:promptText}]
+    })
+  });
+  const data=await resp.json();
+  try{
+    const list=JSON.parse(data.choices[0].message.content);
+    renderAI(list);
+  }catch(e){alert("Error reading AI response");}
+}
+
+/* ---------- Render AI results ---------- */
+function renderAI(list){
+  const grid=document.getElementById('grid');
+  grid.innerHTML='';
+  list.slice(0,9).forEach(d=>{
+    const el=document.createElement('div');
+    el.className='card';
+    el.innerHTML=`
+      <div class="card-body">
+        <div class="title" style="font-weight:600">${d.name}</div>
+        <div class="meta">${d.description||""}</div>
+        <div class="meta"><strong>Ingredients:</strong> ${Array.isArray(d.ingredients)?d.ingredients.join(", "):d.ingredients}</div>
+        <div class="meta"><strong>Instructions:</strong> ${d.instructions}</div>
+      </div>`;
+    grid.appendChild(el);
+  });
+  document.getElementById('prompt').textContent="AI Bartender Suggestions:";
+}
+
+/* ---------- Drink details ---------- */
+function showDrink(name){
+  const d=state.data.find(x=>x.name===decodeURIComponent(name));
+  if(!d)return;
+  alert(`${d.name}\n\nIngredients:\n${d.ingredients.join(', ')}\n\nInstructions:\n${d.instructions}`);
+}
+
+/* ---------- Init ---------- */
+document.getElementById('aiBtn').addEventListener('click',askAI);
+document.addEventListener('DOMContentLoaded',startApp);
+</script>
+</body>
+</html>
